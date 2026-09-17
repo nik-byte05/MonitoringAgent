@@ -14,13 +14,20 @@
 
 using json = nlohmann::json;
 
-std::string ansiToUtf8(const std::string& ansi) {
-    if (ansi.empty()) return "";
+std::string ansiToUtf8(const std::string& ansi)
+{
+    if (ansi.empty())
+    {
+        return "";
+    }
+
     int wlen = MultiByteToWideChar(CP_ACP, 0, ansi.c_str(), -1, nullptr, 0);
+
     std::wstring wide(wlen, 0);
     MultiByteToWideChar(CP_ACP, 0, ansi.c_str(), -1, &wide[0], wlen);
 
     int ulen = WideCharToMultiByte(CP_UTF8, 0, wide.c_str(), -1, nullptr, 0, nullptr, nullptr);
+
     std::string utf8(ulen, 0);
     WideCharToMultiByte(CP_UTF8, 0, wide.c_str(), -1, &utf8[0], ulen, nullptr, nullptr);
 
@@ -90,17 +97,20 @@ MetricRecord captureSnapshot()
     return r;
 }
 
-bool sendBatch(const std::vector<MetricRecord>& records, const std::string& agentId) {
-    if (records.empty()) return true;
+bool sendBatch(const std::vector<MetricRecord>& records, const std::string& agentId)
+{
+    if (records.empty())
+    {
+        return true;
+    }
 
     json j;
     j["agent_id"] = agentId;
-    j["timestamp"] = static_cast<long long>(
-        std::chrono::duration_cast<std::chrono::seconds>(
-            std::chrono::system_clock::now().time_since_epoch()).count());
+    j["timestamp"] = static_cast<long long>(std::chrono::duration_cast<std::chrono::seconds>(std::chrono::system_clock::now().time_since_epoch()).count());
 
     json payload = json::array();
-    for (const auto& r : records) {
+    for (const auto& r : records)
+    {
         payload.push_back({
             {"time", r.time},
             {"process_name", r.process_name},
@@ -108,9 +118,11 @@ bool sendBatch(const std::vector<MetricRecord>& records, const std::string& agen
             {"user_active", r.user_active}
             });
     }
+
     j["payload"] = payload;
 
     httplib::Client cli("localhost", 8080);
+
     cli.set_connection_timeout(3, 0);
     cli.set_write_timeout(5, 0);
     cli.set_read_timeout(5, 0);
@@ -120,59 +132,76 @@ bool sendBatch(const std::vector<MetricRecord>& records, const std::string& agen
     return res && res->status >= 200 && res->status < 300;
 }
 
-void Agent::requestStop() {
+void Agent::requestStop()
+{
     stopRequested_ = true;
 }
 
-void Agent::collectorLoop() {
-    while (!stopRequested_) {
+void Agent::collectorLoop()
+{
+    while (!stopRequested_)
+    {
         MetricRecord r = captureSnapshot();
         buffer_.push(r);
 
-        for (int i = 0; i < 50 && !stopRequested_; ++i) {
-            std::this_thread::sleep_for(std::chrono::milliseconds(100)); // 50 * 100мс = 5 сек
+        for (int i = 0; i < 50 && !stopRequested_; ++i)
+        {
+            std::this_thread::sleep_for(std::chrono::milliseconds(100));
         }
     }
 }
 
-void Agent::senderLoop() {
+void Agent::senderLoop()
+{
     auto lastAttempt = std::chrono::steady_clock::now() - std::chrono::seconds(30);
     bool lastAttemptFailed = false;
 
-    while (!stopRequested_) {
+    while (!stopRequested_)
+    {
         std::this_thread::sleep_for(std::chrono::milliseconds(200));
 
-        auto elapsed = std::chrono::duration_cast<std::chrono::seconds>(
-            std::chrono::steady_clock::now() - lastAttempt).count();
+        auto elapsed = std::chrono::duration_cast<std::chrono::seconds>(std::chrono::steady_clock::now() - lastAttempt).count();
 
-        int minInterval = lastAttemptFailed ? 5 : 0; // после неудачи ждём минимум 5 сек
+        int minInterval = lastAttemptFailed ? 5 : 0;
 
         bool timeToSend = elapsed >= 30;
         bool enoughRecords = buffer_.size() >= 10 && elapsed >= minInterval;
 
-        if (!timeToSend && !enoughRecords) continue;
+        if (!timeToSend && !enoughRecords)
+        {
+            continue;
+        }
 
         auto batch = buffer_.drainAll();
         lastAttempt = std::chrono::steady_clock::now();
-        if (batch.empty()) continue;
+
+        if (batch.empty())
+        {
+            continue;
+        }
 
         bool ok = false;
-        try {
+        try
+        {
             ok = sendBatch(batch, agentId_);
         }
-        catch (const std::exception& e) {
+
+        catch (const std::exception& e)
+        {
             std::cout << "sendBatch failed: " << e.what() << "\n";
         }
 
         lastAttemptFailed = !ok;
 
-        if (!ok) {
+        if (!ok)
+        {
             for (auto& r : batch) buffer_.push(r);
         }
     }
 }
 
-void Agent::run() {
+void Agent::run()
+{
     std::thread collector(&Agent::collectorLoop, this);
     std::thread sender(&Agent::senderLoop, this);
 
@@ -182,18 +211,24 @@ void Agent::run() {
     flushToBackupFile();
 }
 
-void Agent::flushToBackupFile() {
+void Agent::flushToBackupFile()
+{
     auto remaining = buffer_.drainAll();
-    if (remaining.empty()) return;
+
+    if (remaining.empty())
+    {
+        return;
+    }
 
     json j;
+
     j["agent_id"] = agentId_;
-    j["timestamp"] = static_cast<long long>(
-        std::chrono::duration_cast<std::chrono::seconds>(
-            std::chrono::system_clock::now().time_since_epoch()).count());
+    j["timestamp"] = static_cast<long long>(std::chrono::duration_cast<std::chrono::seconds>(std::chrono::system_clock::now().time_since_epoch()).count());
 
     json payload = json::array();
-    for (const auto& r : remaining) {
+
+    for (const auto& r : remaining)
+    {
         payload.push_back({
             {"time", r.time},
             {"process_name", r.process_name},
@@ -201,6 +236,7 @@ void Agent::flushToBackupFile() {
             {"user_active", r.user_active}
             });
     }
+
     j["payload"] = payload;
 
     std::ofstream out("backup.json");
@@ -209,34 +245,43 @@ void Agent::flushToBackupFile() {
     std::cout << "Saved " << remaining.size() << " unsent record(s) to backup.json\n";
 }
 
-namespace {
+namespace
+{
     Agent* g_agentInstance = nullptr;
 
-    BOOL WINAPI consoleHandler(DWORD signal) {
-        switch (signal) {
+    BOOL WINAPI consoleHandler(DWORD signal)
+    {
+        switch (signal)
+        {
         case CTRL_C_EVENT:
         case CTRL_BREAK_EVENT:
         case CTRL_CLOSE_EVENT:
         case CTRL_LOGOFF_EVENT:
         case CTRL_SHUTDOWN_EVENT:
-            if (g_agentInstance) {
+            if (g_agentInstance)
+            {
                 g_agentInstance->requestStop();
             }
-            Sleep(2500); // даём время потокам корректно завершиться
+
+            Sleep(2500);
+
             return TRUE;
+
         default:
             return FALSE;
         }
     }
 }
 
-int main() {
+int main()
+{
     Agent agent;
     g_agentInstance = &agent;
     SetConsoleCtrlHandler(consoleHandler, TRUE);
 
     std::cout << "MonitoringAgent started. Press Ctrl+C to stop.\n";
     agent.run();
+
     std::cout << "MonitoringAgent stopped gracefully.\n";
 
     return 0;

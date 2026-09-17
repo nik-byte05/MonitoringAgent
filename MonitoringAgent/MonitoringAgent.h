@@ -57,7 +57,8 @@ MetricRecord captureSnapshot();
 
 bool sendBatch(const std::vector<MetricRecord>& records, const std::string& agentId);
 
-class Agent {
+class Agent
+{
 public:
     void run();
     void requestStop();
